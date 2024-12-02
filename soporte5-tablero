@@ -1,0 +1,199 @@
+import dash
+from dash import dcc, html, Input, Output, State
+import pandas as pd
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+import pickle
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+import seaborn as sns
+import matplotlib.pyplot as plt
+import base64
+from io import BytesIO
+
+# Cargar el modelo entrenado
+modelo = load_model("modelo_nn.keras")
+
+# Cargar el OneHotEncoder entrenado
+with open("one_hot_encoder.pkl", "rb") as f:
+    ohe = pickle.load(f)
+
+
+# Definir las opciones de las variables categóricas
+column_options = {
+    "COLE_AREA_UBICACION": ["URBANO", "RURAL"],
+    "COLE_BILINGUE": ["N", "S"],
+    "COLE_CALENDARIO": ["A", "B", "OTRO"],
+    "COLE_CARACTER": ['ACADÉMICO', 'TÉCNICO/ACADÉMICO', 'TÉCNICO', 'NO APLICA'],
+    "COLE_GENERO": ['MIXTO', 'FEMENINO', 'MASCULINO'],
+    "COLE_JORNADA": ['MAÑANA', 'COMPLETA', 'SABATINA', 'TARDE', 'NOCHE', 'UNICA'],
+    "COLE_NATURALEZA": ['OFICIAL', 'NO OFICIAL'],
+    "COLE_SEDE_PRINCIPAL": ["S", "N"],
+    "ESTU_ESTADOINVESTIGACION": ['PUBLICAR', 'NO SE COMPROBO IDENTIDAD DEL EXAMINADO', 'VALIDEZ OFICINA JURÍDICA', 'PRESENTE CON LECTURA TARDIA'],
+    "ESTU_GENERO": ["M", "F"],
+    "ESTU_PRIVADO_LIBERTAD": ["N", "S"],
+    "FAMI_CUARTOSHOGAR": ['Cuatro', 'Tres', 'Dos', 'Uno', 'Cinco', 'Siete', 'Diez o más', 'Seis', 'Seis o mas', 'Nueve', 'Ocho'],
+    "FAMI_EDUCACIONMADRE": ['Secundaria (Bachillerato) completa', 'Primaria incompleta',
+       'Primaria completa', 'Secundaria (Bachillerato) incompleta',
+       'Técnica o tecnológica completa', 'Educación profesional completa',
+       'Técnica o tecnológica incompleta', 'Ninguno', 'No sabe',
+       'Postgrado', 'Educación profesional incompleta', 'No Aplica'],
+    "FAMI_EDUCACIONPADRE": ['Secundaria (Bachillerato) completa', 'Primaria completa',
+       'Secundaria (Bachillerato) incompleta', 'Primaria incompleta',
+       'No sabe', 'Técnica o tecnológica completa', 'Ninguno',
+       'Educación profesional completa',
+       'Técnica o tecnológica incompleta',
+       'Educación profesional incompleta', 'Postgrado', 'No Aplica'],
+    "FAMI_ESTRATOVIVIENDA": ['Estrato 2', 'Estrato 1', 'Estrato 3', 'Estrato 6', 'Estrato 5',
+       'Estrato 4', 'Sin Estrato'],
+    "FAMI_PERSONASHOGAR": ['5 a 6', 'Cinco', 'Cuatro', '3 a 4', 'Tres', '1 a 2', 'Seis',
+       'Dos', '7 a 8', 'Diez', 'Siete', 'Once', 'Doce o más', 'Ocho',
+       'Nueve', '9 o más', 'Una'],
+    "FAMI_TIENEAUTOMOVIL": ["Si", "No"],
+    "FAMI_TIENECOMPUTADOR": ["Si", "No"],
+    "FAMI_TIENEINTERNET": ["Si", "No"],
+    "FAMI_TIENELAVADORA": ["Si", "No"]
+}
+
+## Importar datos para las gráficas 
+# Cargar datos
+df = pd.read_csv('datos_limpios.csv')
+# Quitar columna unnamed
+df.drop(df.columns[[0]], axis=1, inplace=True)
+materias = ['PUNT_INGLES', 'PUNT_MATEMATICAS', 'PUNT_C_NATURALES', 'PUNT_SOCIALES_CIUDADANAS', 'PUNT_LECTURA_CRITICA']
+
+# DASH
+import dash
+from dash import dcc, html, Input, Output, State
+import plotly.graph_objects as go
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import base64
+from io import BytesIO
+
+# Crear la app Dash
+app = dash.Dash(__name__)
+app.title = "Predicción y Gráficas"
+
+# Layout de la app
+app.layout = html.Div([
+    dcc.Tabs([
+        dcc.Tab(label="Predicción", children=[
+            html.H1("Predicción de Puntaje Global"),
+            html.Div([
+                html.Div([
+                    html.Label(col),
+                    dcc.Dropdown(
+                        id=f"input-{col}",
+                        options=[{"label": opt, "value": opt} for opt in options],
+                        placeholder=f"Seleccione {col}",
+                        style={"margin-bottom": "10px"}
+                    )
+                ]) for col, options in column_options.items()
+            ]),
+            html.Button("Predecir", id="predict-button", n_clicks=0, style={"margin-top": "20px"}),
+            html.Div(id="prediction-output", style={"margin-top": "20px"})
+        ]),
+        dcc.Tab(label="Gráficas", children=[
+            html.H1("Gráficas de Análisis"),
+            dcc.Graph(id="example-graph"),
+            html.Img(id="boxplot-graph"),
+            html.Img(id="bilingue-boxplot-graph"),
+            html.Img(id="educacion-padre-boxplot-graph"),
+            html.Button("Actualizar Gráficas", id="update-graphs-button", n_clicks=0)
+        ])
+    ])
+])
+
+# Callback para procesar la entrada y generar predicciones
+@app.callback(
+    Output("prediction-output", "children"),
+    Input("predict-button", "n_clicks"),
+    [State(f"input-{col}", "value") for col in column_options]
+)
+def generar_prediccion(n_clicks, *values):
+    if n_clicks == 0:
+        return "Ingrese los valores y presione el botón para predecir."
+
+    if None in values:
+        return "Por favor complete todos los campos antes de predecir."
+
+    try:
+        input_data = pd.DataFrame([values], columns=column_options.keys())
+        input_encoded = ohe.transform(input_data)
+        prediccion = modelo.predict(input_encoded)
+        return f"Puntaje predicho: {prediccion[0][0]:.2f}"
+    except Exception as e:
+        return f"Error en la predicción: {e}"
+
+# Callback para actualizar el histograma y todos los boxplots
+@app.callback(
+    [Output("example-graph", "figure"),
+     Output("boxplot-graph", "src"),
+     Output("bilingue-boxplot-graph", "src"),
+     Output("educacion-padre-boxplot-graph", "src")],
+    Input("update-graphs-button", "n_clicks")
+)
+def actualizar_graficos(n_clicks):
+    # Crear el histograma con Plotly
+    fig_hist = go.Figure(
+        data=[go.Histogram(
+            x=df["PUNT_GLOBAL"],
+            nbinsx=10,
+            marker_color="cornflowerblue",
+            marker_line_color="black",
+            marker_line_width=1.5
+        )]
+    )
+    fig_hist.update_layout(
+        title="Histograma de Puntaje Global",
+        xaxis_title="Puntaje Global",
+        yaxis_title="Frecuencia",
+        bargap=0.1,
+        template="plotly_white"
+    )
+
+    # Crear el primer boxplot con seaborn y matplotlib
+    plt.figure(figsize=(10, 6))
+    ax = sns.boxplot(x='FAMI_ESTRATOVIVIENDA', y='PUNT_GLOBAL', data=df, palette='Set2')
+    plt.title('Distribución del puntaje global por estrato', fontsize=16, fontweight='bold')
+    plt.xlabel('Estrato de la vivienda', fontsize=14)
+    plt.ylabel('Puntaje Global', fontsize=14)
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    plt.close()
+    img_base64_estrato = base64.b64encode(buffer.getvalue()).decode()
+    img_src_estrato = f"data:image/png;base64,{img_base64_estrato}"
+
+    # Crear el segundo boxplot con seaborn y matplotlib
+    plt.figure(figsize=(10, 6))
+    ax = sns.boxplot(x='COLE_BILINGUE', y='PUNT_GLOBAL', data=df, palette=['plum', 'darkolivegreen'])
+    plt.title('Distribución del puntaje global por bilingüismo', fontsize=16, fontweight='bold')
+    plt.xlabel('Colegio Bilingüe', fontsize=14)
+    plt.ylabel('Puntaje Global', fontsize=14)
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    plt.close()
+    img_base64_bilingue = base64.b64encode(buffer.getvalue()).decode()
+    img_src_bilingue = f"data:image/png;base64,{img_base64_bilingue}"
+
+    # Crear el tercer boxplot con seaborn y matplotlib
+    plt.figure(figsize=(10, 6))
+    ax = sns.boxplot(x='FAMI_EDUCACIONPADRE', y='PUNT_GLOBAL', data=df, palette='Set3')
+    plt.title('Distribución del puntaje global por educación del padre', fontsize=16, fontweight='bold')
+    plt.xlabel('Nivel de educación', fontsize=14)
+    plt.ylabel('Puntaje Global', fontsize=14)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    plt.close()
+    img_base64_educacion_padre = base64.b64encode(buffer.getvalue()).decode()
+    img_src_educacion_padre = f"data:image/png;base64,{img_base64_educacion_padre}"
+
+    return fig_hist, img_src_estrato, img_src_bilingue, img_src_educacion_padre
+
+# Ejecutar la app
+if __name__ == "__main__":
+    app.run_server(debug=True)
