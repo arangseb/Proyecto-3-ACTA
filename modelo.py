@@ -56,7 +56,7 @@ model = build_model(X_train_processed.shape[1])
 mlflow.set_experiment("Modelo Redes Neuronales con TensorFlow")  # Configura el experimento
 #mlflow.tensorflow.autolog()  # Activar autologging para TensorFlow
 
-with mlflow.start_run(run_name="Regresión - Redes Neuronales_128_64_32"):
+with mlflow.start_run(run_name="Regresión - Redes Neuronales_64_64_Sigmoid"):
     # Entrenar el modelo
     history = model.fit(
         X_train_processed,
